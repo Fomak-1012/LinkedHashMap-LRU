@@ -371,21 +371,20 @@ public:
 		iterator it = find(value_pair.first);
 
 		if(it != end()) {
+			const_cast<value_type&>(*it.iter).second = value_pair.second;
 			return sjtu::pair<iterator, bool>(it, false);
+		}
+
+		if(static_cast<double>(size + 1) / capacity > load_factor) {
+			expand();
 		}
 		size_t idx = getIndex(value_pair.first);
 		buckets[idx].insert_tail(value_pair);
 		size++;
 
-		if(static_cast<double>(size) / capacity > load_factor) {
-			expand();
-			idx = getIndex(value_pair.first);
-		}
-		it = iterator();
-		it.iter = buckets[idx].end();
-		it.map_ptr = this;
-		it.index = idx;
-		return sjtu::pair<iterator, bool>(it, true);
+		auto lit = buckets[idx].end();
+		lit--;
+		return sjtu::pair<iterator, bool>(iterator(idx, lit, this), true);
 	}
 	/**
 	 * the value_pair exists, remove and return true
@@ -517,6 +516,12 @@ public:
 		const_iterator(list_iterator it, const linked_hashmap* ptr) : lit(it), map_ptr(ptr) {}
 		const_iterator(const iterator &other) : lit(other.lit), map_ptr(other.map_ptr) {}
 
+		const_iterator &operator=(const iterator &rhs) {
+			lit = rhs.lit;
+			map_ptr = rhs.map_ptr;
+			return *this;
+		}
+
 		/**
 		 * iter++
 		 */
@@ -622,17 +627,13 @@ public:
 	}
 	T &operator[](const Key &key) {
 		auto it = base_hashmap::find(key);
-		if (it != base_hashmap::end()) {
-			return at(key);
+		if (it == base_hashmap::end()) {
+			insert(value_type(key, T()));
 		}
-		throw "invalid";
+		return at(key);
 	}
 	const T &operator[](const Key &key) const {
-		auto it = base_hashmap::find(key);
-		if (it != base_hashmap::end()) {
-			return at(key);
-		}
-		throw "invalid";
+		return at(key);
 	}
 
 	/**
@@ -670,7 +671,7 @@ public:
 	}
 
 	size_t size() const {
-		return this->size();
+		return base_hashmap::size;
 	}
 	/**
 	 * insert the value_piar
