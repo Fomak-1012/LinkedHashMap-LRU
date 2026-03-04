@@ -222,10 +222,17 @@ template<class Key, class T, class Hash = std::hash<Key>, class Equal = std::equ
 class hashmap {
 public:
 	using value_type = pair<const Key, T>;
+	using list_iterator = double_list<value_type>::iterator;
 	/**
 	 * elements
 	 * add whatever you want
 	 */
+	double_list<value_type> *buckets;
+	size_t capacity;
+	size_t size;
+	double load_factor = 0.75;
+	Hash hash_func;
+	Equal equal_func;
 
 	// --------------------------
 
@@ -233,10 +240,26 @@ public:
 	 * the follows are constructors and destructors
 	 * you can also add some if needed.
 	 */
-	hashmap() {}
-	hashmap(const hashmap &other) {}
-	~hashmap() {}
-	hashmap &operator=(const hashmap &other) {}
+	hashmap() : capacity(16), size(0) {}
+	hashmap(const hashmap &other) : capacity(other.capacity), size(0) {
+		buckets = new double_list<value_type>[capacity]; 
+		for (size_t i = 0; i < capacity; i++) {
+			 for (auto it = other.buckets[i].begin(); it != other.buckets[i].end(); it++) {
+				this->insert(*it);
+			}
+		}
+	}
+	~hashmap() {
+		delete[] buckets;
+	}
+	hashmap &operator=(const hashmap &other) {
+		if (this == &other) return *this;
+		hashmap tmp(other);
+		std::swap(buckets, tmp.buckets);
+		std::swap(capacity, tmp.capacity);
+		std::swap(size, tmp.size);
+		return *this;
+	}
 
 	class iterator {
 	public:
@@ -244,56 +267,140 @@ public:
 		 * elements
 		 * add whatever you want
 		 */
+		list_iterator iter;
+		hashmap* map_ptr;
+		size_t index;
 		// --------------------------
 		/**
 		 * the follows are constructors and destructors
 		 * you can also add some if needed.
 		 */
-		iterator() {}
-		iterator(const iterator &t) {}
+		iterator() : iter(), map_ptr(nullptr), index(0) {}
+		iterator(size_t idx, list_iterator it, hashmap* ptr) : index(idx), iter(it), map_ptr(ptr) {}
+		iterator(const iterator &t) : iter(t.iter), map_ptr(t.map_ptr), index(t.index) {}
 		~iterator() {}
 
 		/**
 		 * if point to nothing
 		 * throw
 		 */
-		value_type &operator*() const {}
+		value_type &operator*() const {
+			if (map_ptr == nullptr || index >= map_ptr->capacity) {
+				throw "point to nothing";
+			}
+			return *iter;
+		}
 
 		/**
 		 * other operation
 		 */
-		value_type *operator->() const noexcept {}
-		bool operator==(const iterator &rhs) const {}
-		bool operator!=(const iterator &rhs) const {}
+		value_type *operator->() const noexcept {
+			return &(*iter);
+		}
+		bool operator==(const iterator &rhs) const {
+			return map_ptr == rhs.map_ptr 
+				&& index == rhs.index 
+				&& iter == rhs.iter;
+		}
+		bool operator!=(const iterator &rhs) const {
+			return !(*this == rhs);
+		}
 	};
 
-	void clear() {}
+	void clear() {
+		size = 0;
+		for (size_t i = 0; i < capacity; i++) {
+			while (!buckets[i].empty()) {
+				buckets[i].delete_head();
+			}
+		}
+	}
 	/**
 	 * you need to expand the hashmap dynamically
 	 */
-	void expand() {}
+	void expand() {
+		size_t old_capacity = capacity;
+		capacity <<= 1;
+		double_list<value_type> *old_buckets = buckets;
+		buckets = new double_list<value_type>[capacity];
+
+		for (int i = 0; i < old_capacity; i++) {
+			auto it = old_buckets[i].begin();
+			while (it != old_buckets[i].end()) {
+				value_type& item = *it;
+				size_t new_idx = getIndex(item.first);
+				buckets[new_idx].insert_tail(item);
+				it++;
+			}
+		}
+
+		delete[] old_buckets;
+	}
 
 	/**
 	 * the iterator point at nothing
 	 */
-	iterator end() const {}
+	iterator end() const {
+		if (capacity == 0) return iterator(capacity, list_iterator(), const_cast<hashmap*>(this));
+		return iterator(capacity - 1, buckets[capacity-1].end(), const_cast<hashmap*>(this));
+	}
 	/**
 	 * find, return a pointer point to the value
 	 * not find, return the end (point to nothing)
 	 */
-	iterator find(const Key &key) const {}
+	iterator find(const Key &key) const {
+		if (capacity == 0) return end();
+		size_t idx = getIndex(key);
+		for (auto it = buckets[idx].begin(); it != buckets[idx].end(); it++) {
+			if (equal_func((*it).first, key)) {
+				return iterator(idx, it, const_cast<hashmap*>(this));
+			}
+		}
+		return end();
+	}
 	/**
 	 * already have a value_pair with the same key
 	 * -> just update the value, return false
 	 * not find a value_pair with the same key
 	 * -> insert the value_pair, return true
 	 */
-	sjtu::pair<iterator, bool> insert(const value_type &value_pair) {}
+	sjtu::pair<iterator, bool> insert(const value_type &value_pair) {
+		iterator it = find(value_pair.first);
+
+		if(it != end()) {
+			return sjtu::pair<iterator, bool>(it, false);
+		}
+		size_t idx = getIndex(value_pair.first);
+		buckets[idx].insert_tail(value_pair);
+		size++;
+
+		if(static_cast<double>(size / capacity) > load_factor) {
+			expand();
+			idx = getIndex(value_pair.first);
+		}
+		it = iterator();
+		it.iter = buckets[idx].end();
+		it.map_ptr = this;
+		it.index = idx;
+		return sjtu::pair<iterator, bool>(it, true);
+	}
 	/**
 	 * the value_pair exists, remove and return true
 	 * otherwise, return false
 	 */
-	bool remove(const Key &key) {}
+	bool remove(const Key &key) {
+		iterator it = find(key);
+		if(it == end()) return false;
+		auto& list = buckets[it.index];
+		list.erase(it.iter);
+		size--;
+		return true;
+	}
+private:
+	size_t getIndex(const Key &key) const {
+		size_t idx = hash_func(key) % capacity;
+		return idx;
+	}
 };
 
 template<class Key, class T, class Hash = std::hash<Key>, class Equal = std::equal_to<Key>>
