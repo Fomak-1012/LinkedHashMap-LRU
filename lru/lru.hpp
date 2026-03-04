@@ -30,10 +30,11 @@ public:
 	struct node {
 		T* val;
 		node *prev, *next;
-		node() = delete;
+		node() : prev(nullptr), next(nullptr), val(nullptr) {};
 		node(const T& v, node* p = nullptr, node* n = nullptr): val(new T(v)), prev(p), next(n) {}
 		~node() { delete val; }
 	};
+	node *head, *tail;
 
 	// --------------------------
 	/**
@@ -82,6 +83,7 @@ public:
 		 * you can also add some if needed.
 		 */
 		iterator() : p(nullptr) {}
+		iterator(node* ptr) : p(ptr) {}
 		iterator(const iterator &t) : p(t.p) {}
 		~iterator() {}
 		
@@ -222,7 +224,7 @@ template<class Key, class T, class Hash = std::hash<Key>, class Equal = std::equ
 class hashmap {
 public:
 	using value_type = pair<const Key, T>;
-	using list_iterator = double_list<value_type>::iterator;
+	using list_iterator = typename double_list<value_type>::iterator;
 	/**
 	 * elements
 	 * add whatever you want
@@ -240,7 +242,9 @@ public:
 	 * the follows are constructors and destructors
 	 * you can also add some if needed.
 	 */
-	hashmap() : capacity(16), size(0) {}
+	hashmap() : capacity(16), size(0) {
+		buckets = new double_list<value_type>[capacity];
+	}
 	hashmap(const hashmap &other) : capacity(other.capacity), size(0) {
 		buckets = new double_list<value_type>[capacity]; 
 		for (size_t i = 0; i < capacity; i++) {
@@ -324,13 +328,12 @@ public:
 		double_list<value_type> *old_buckets = buckets;
 		buckets = new double_list<value_type>[capacity];
 
-		for (int i = 0; i < old_capacity; i++) {
-			auto it = old_buckets[i].begin();
-			while (it != old_buckets[i].end()) {
-				value_type& item = *it;
-				size_t new_idx = getIndex(item.first);
-				buckets[new_idx].insert_tail(item);
-				it++;
+		for (size_t i = 0; i < old_capacity; i++) {
+			for (auto it = old_buckets[i].begin();
+				it != old_buckets[i].end(); ++it) {
+
+				size_t idx = getIndex((*it).first);
+				buckets[idx].insert_tail(*it);
 			}
 		}
 
@@ -374,7 +377,7 @@ public:
 		buckets[idx].insert_tail(value_pair);
 		size++;
 
-		if(static_cast<double>(size / capacity) > load_factor) {
+		if(static_cast<double>(size) / capacity > load_factor) {
 			expand();
 			idx = getIndex(value_pair.first);
 		}
@@ -404,10 +407,10 @@ private:
 };
 
 template<class Key, class T, class Hash = std::hash<Key>, class Equal = std::equal_to<Key>>
-class linked_hashmap : public hashmap<Key, T, Hash, Equal> {
+class linked_hashmap : public hashmap<Key, typename double_list<pair<const Key, T>>::iterator, Hash, Equal> { 
 public:
 	using value_type = pair<const Key, T>;
-	using list_iterator = double_list<value_type>::iterator;
+	using list_iterator = typename double_list<value_type>::iterator;
 	using base_hashmap = hashmap<Key, list_iterator, Hash, Equal>;
 
 	/**
@@ -584,18 +587,53 @@ public:
 	};
 
 	linked_hashmap() {}
-	linked_hashmap(const linked_hashmap &other) :  {}
-	~linked_hashmap() {}
-	linked_hashmap &operator=(const linked_hashmap &other) {}
+	linked_hashmap(const linked_hashmap &other) {
+		global_list = other.global_list;
+		for (auto it = global_list.begin(); it != global_list.end(); it++) {
+			base_hashmap::insert(sjtu::pair<const Key, list_iterator>((*it).first, it));
+		}
+	}
+	~linked_hashmap() {
+		clear();
+	}
+	linked_hashmap &operator=(const linked_hashmap &other) {
+		if (this == &other) return *this;
+		clear();
+		for (auto it = other.cbegin(); it != other.cend(); ++it)
+			insert(*it);
+		return *this;
+	}
 
 	/**
 	 * return the value connected with the Key(O(1))
 	 * if the key not found, throw
 	 */
-	T &at(const Key &key) {}
-	const T &at(const Key &key) const {}
-	T &operator[](const Key &key) {}
-	const T &operator[](const Key &key) const {}
+	T &at(const Key &key) {
+		auto it = base_hashmap::find(key);
+        if (it == base_hashmap::end())
+            throw "invalid";
+        return (*((*it).second)).second;
+	}
+	const T &at(const Key &key) const {
+		auto it = base_hashmap::find(key);
+		if (it == base_hashmap::end())
+			throw "invalid";
+		return (*((*it).second)).second;
+	}
+	T &operator[](const Key &key) {
+		auto it = base_hashmap::find(key);
+		if (it != base_hashmap::end()) {
+			return at(key);
+		}
+		throw "invalid";
+	}
+	const T &operator[](const Key &key) const {
+		auto it = base_hashmap::find(key);
+		if (it != base_hashmap::end()) {
+			return at(key);
+		}
+		throw "invalid";
+	}
 
 	/**
 	 * return an iterator point to the first
@@ -647,17 +685,14 @@ public:
 	pair<iterator, bool> insert(const value_type &value) {
 		auto hash_it = base_hashmap::find(value.first);
 
-		if(hash_it != base_hashmap::end()) {
-			list_iterator target_list_it = (*hash_it).second;
+		if (hash_it != base_hashmap::end()) {
+			auto target = (*hash_it).second;
+			(*target).second = value.second;
 
-			target_list_it->second = value.second;
-			value_type new_val = *target_list_it;
-
-			global_list.erase(target_list_it);
-			global_list.insert_head(new_val);
+			global_list.erase(target);
+			global_list.insert_head(value);
 
 			(*hash_it).second = global_list.begin();
-
 			return pair<iterator, bool>(iterator(global_list.begin(), this), false);
 		}
 		else {
@@ -665,7 +700,6 @@ public:
 			list_iterator new_lit = global_list.begin();
 
 			base_hashmap::insert(sjtu::pair<const Key, list_iterator>(value.first, new_lit));
-
 			return pair<iterator, bool>(iterator(new_lit, this), true);
 		}
 	}
@@ -733,6 +767,9 @@ public:
 		if(it == data.end()){
 			return nullptr;
 		}
+
+		auto value = *it;
+		data.insert(value);
 		return &(data.at(v));
 	}
 	/**
