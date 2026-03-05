@@ -200,12 +200,14 @@ public:
 		tail->prev = tmp;
 	}
 	void delete_head() {
+		if (head->next == tail) return;
 		node* tmp = head->next;
 		head->next = tmp->next;
 		tmp->next->prev = head;
 		delete tmp;
 	}
 	void delete_tail() {
+		if (tail->prev == head) return;
 		node* tmp = tail->prev;
 		tail->prev = tmp->prev;
 		tmp->prev->next = tail;
@@ -593,9 +595,8 @@ public:
 
 	linked_hashmap() {}
 	linked_hashmap(const linked_hashmap &other) {
-		global_list = other.global_list;
-		for (auto it = global_list.begin(); it != global_list.end(); it++) {
-			base_hashmap::insert(sjtu::pair<const Key, list_iterator>((*it).first, it));
+		for (auto it = other.cbegin(); it != other.cend(); ++it) {
+			this->insert(*it);
 		}
 	}
 	~linked_hashmap() {
@@ -604,8 +605,9 @@ public:
 	linked_hashmap &operator=(const linked_hashmap &other) {
 		if (this == &other) return *this;
 		clear();
-		for (auto it = other.cbegin(); it != other.cend(); ++it)
-			insert(*it);
+		for (auto it = other.cbegin(); it != other.cend(); ++it) {
+			this->insert(*it);
+		}
 		return *this;
 	}
 
@@ -613,11 +615,18 @@ public:
 	 * return the value connected with the Key(O(1))
 	 * if the key not found, throw
 	 */
+
 	T &at(const Key &key) {
-		auto it = base_hashmap::find(key);
-        if (it == base_hashmap::end())
-            throw "invalid";
-        return (*((*it).second)).second;
+		auto hash_it = base_hashmap::find(key);
+		if (hash_it == base_hashmap::end())
+			throw "invalid";
+		list_iterator lit = (*hash_it).second;
+		value_type value = *lit;
+		global_list.erase(lit);
+		global_list.insert_tail(value);
+		(*hash_it).second = global_list.end();
+		--((*hash_it).second);
+		return (*((*hash_it).second)).second;
 	}
 	const T &at(const Key &key) const {
 		auto it = base_hashmap::find(key);
@@ -626,10 +635,6 @@ public:
 		return (*((*it).second)).second;
 	}
 	T &operator[](const Key &key) {
-		auto it = base_hashmap::find(key);
-		if (it == base_hashmap::end()) {
-			insert(value_type(key, T()));
-		}
 		return at(key);
 	}
 	const T &operator[](const Key &key) const {
@@ -664,14 +669,14 @@ public:
 	}
 
 	void clear() {
+		this->base_hashmap::clear();
 		while (!global_list.empty()) {
 			global_list.delete_head();
 		}
-		base_hashmap::clear();
 	}
 
 	size_t size() const {
-		return base_hashmap::size;
+		return this->base_hashmap::size;
 	}
 	/**
 	 * insert the value_piar
@@ -684,24 +689,21 @@ public:
 	 * add a new element and return true
 	 */
 	pair<iterator, bool> insert(const value_type &value) {
-		auto hash_it = base_hashmap::find(value.first);
+		auto hash_it = this->base_hashmap::find(value.first);
 
-		if (hash_it != base_hashmap::end()) {
-			auto target = (*hash_it).second;
-			(*target).second = value.second;
-
-			global_list.erase(target);
-			global_list.insert_head(value);
-
-			(*hash_it).second = global_list.begin();
-			return pair<iterator, bool>(iterator(global_list.begin(), this), false);
+		if (hash_it != this->base_hashmap::end()) {
+			global_list.erase((*hash_it).second);
+			global_list.insert_tail(value);
+			(*hash_it).second = global_list.end();
+			--((*hash_it).second);
+			return pair<iterator, bool>(iterator((*hash_it).second, this), false);
 		}
 		else {
-			global_list.insert_head(value);
-			list_iterator new_lit = global_list.begin();
-
-			base_hashmap::insert(sjtu::pair<const Key, list_iterator>(value.first, new_lit));
-			return pair<iterator, bool>(iterator(new_lit, this), true);
+			global_list.insert_tail(value);
+			auto it = global_list.end();
+			--it;
+			this->base_hashmap::insert(sjtu::pair<const Key, list_iterator>(value.first, it));
+			return pair<iterator, bool>(iterator(it, this), true);
 		}
 	}
 	/**
@@ -712,7 +714,7 @@ public:
 	void remove(iterator pos) {
 		if (pos == end() || pos.map_ptr != this) 
 			throw "invalid remove";
-		base_hashmap::remove(pos->first);
+		this->base_hashmap::remove(pos->first);
 		global_list.erase(pos.lit);
 	}
 	/**
@@ -752,12 +754,15 @@ public:
 	 * delete something in the memory if necessary
 	 */
 	void save(const value_type &v) {
-		data.insert(v);
-
-		if(data.size() > static_cast<size_t>(max_size)) {
-			auto it = data.end();
-			--it;
-			data.remove(it);
+		auto it = data.find(v.first);
+		if (it != data.end()) {
+			data.insert(v);
+		}
+		else {
+			data.insert(v);
+			if (data.size() > max_size) {
+				data.remove(data.begin());
+			}
 		}
 	}
 	/**
@@ -769,8 +774,6 @@ public:
 			return nullptr;
 		}
 
-		auto value = *it;
-		data.insert(value);
 		return &(data.at(v));
 	}
 	/**
@@ -784,7 +787,7 @@ public:
 		for (it = data.begin(); it != data.end(); it++) {
 			std::cout << (*it).first.val << " "
 					<< (*it).second << std::endl;
-    }
+    	}
 	}
 };
 } // namespace sjtu
